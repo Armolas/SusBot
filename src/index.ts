@@ -19,29 +19,37 @@ const { WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV } = validateEnvironment([
 
 async function main() {
   console.log("🕵️ Starting SusBot - The Social Deduction Game Agent...");
+  console.log(`📍 Environment: ${XMTP_ENV}`);
+  console.log(`📅 Started at: ${new Date().toISOString()}`);
 
   try {
     // Create XMTP client
     const signer = createSigner(WALLET_KEY);
     const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
 
+    console.log("🔧 Creating XMTP client...");
     const client = await Client.create(signer, {
       dbEncryptionKey,
       env: XMTP_ENV as XmtpEnv,
       codecs: [new ActionsCodec(), new IntentCodec()],
     });
 
+    console.log("✅ XMTP client created successfully");
     void logAgentDetails(client);
 
     // Initialize game manager
+    console.log("🎮 Initializing GameManager...");
     const gameManager = new GameManager(client);
     globalGameManager = gameManager;
+    console.log("✅ GameManager initialized");
 
     // Sync conversations
     console.log("🔄 Syncing conversations...");
     await client.conversations.sync();
+    console.log("✅ Conversations synced");
 
     console.log("👂 Listening for messages...");
+    console.log("✅ Bot is ready and running!");
 
     // Keep the bot running with proper error handling
     while (true) {
