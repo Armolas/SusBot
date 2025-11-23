@@ -46,12 +46,11 @@ export async function handleTextMessage(
 }
 
 /**
- * Handle poll response (when using custom Poll content type)
+ * Handle Intent message (button click response)
  */
-export async function handlePollResponse(
+export async function handleIntentMessage(
   conversation: Conversation,
-  pollId: string,
-  optionId: string,
+  intentContent: { id: string; actionId: string },
   voterInboxId: string,
   gameManager: GameManager
 ): Promise<void> {
@@ -61,17 +60,19 @@ export async function handlePollResponse(
     return;
   }
 
+  const { id, actionId } = intentContent;
+
   // Check if this is a duration vote
-  if (pollId.startsWith('duration-')) {
-    const duration = parseInt(optionId) as GameDuration;
+  if (id.startsWith('duration-')) {
+    const duration = parseInt(actionId) as GameDuration;
     if ([5, 7, 10].includes(duration)) {
       await gameManager.handleDurationVote(conversation, voterInboxId, duration);
     }
   }
 
   // Check if this is a player vote
-  else if (pollId.startsWith('voting-')) {
-    await gameManager.handlePlayerVote(conversation, voterInboxId, optionId);
+  else if (id.startsWith('voting-')) {
+    await gameManager.handlePlayerVote(conversation, voterInboxId, actionId);
   }
 }
 

@@ -6,8 +6,9 @@ import {
 } from "./helpers/client.js";
 import { Client, type XmtpEnv } from "@xmtp/node-sdk";
 import { GameManager } from "./game/GameManager.js";
-import { PollCodec, type PollResponse } from "./types/PollContent.js";
-import { handleTextMessage, handlePollResponse } from "./handlers/messageHandlers.js";
+import { ActionsCodec } from "./types/ActionsContent.js";
+import { IntentCodec, type IntentContent } from "./types/IntentContent.js";
+import { handleTextMessage, handleIntentMessage } from "./handlers/messageHandlers.js";
 
 // Validate required environment variables
 const { WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV } = validateEnvironment([
@@ -27,7 +28,7 @@ async function main() {
     const client = await Client.create(signer, {
       dbEncryptionKey,
       env: XMTP_ENV as XmtpEnv,
-      codecs: [new PollCodec()],
+      codecs: [new ActionsCodec(), new IntentCodec()],
     });
 
     void logAgentDetails(client);
@@ -89,13 +90,12 @@ async function main() {
                 senderInboxId,
                 gameManager
               );
-            } else if (message.contentType?.typeId === "poll") {
-              // Handle poll responses (if using custom poll content type)
-              const pollResponse = message.content as any as PollResponse;
-              await handlePollResponse(
+            } else if (message.contentType?.typeId === "intent") {
+              // Handle Intent responses (button clicks)
+              const intentContent = message.content as any as IntentContent;
+              await handleIntentMessage(
                 conversation as any,
-                pollResponse.pollId,
-                pollResponse.optionId,
+                intentContent,
                 senderInboxId,
                 gameManager
               );
