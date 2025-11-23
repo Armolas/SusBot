@@ -5,6 +5,7 @@
 
 export type GameStatus =
   | 'idle'              // No game running
+  | 'registering_names' // Players joining with display names
   | 'voting_duration'   // Voting on game duration
   | 'assigning_roles'   // DMing roles to players
   | 'discussion'        // Discussion phase active
@@ -16,6 +17,7 @@ export type GameDuration = 5 | 7 | 10; // minutes
 export interface Player {
   inboxId: string;
   address: string;
+  displayName: string; // Player's chosen display name
   isImposter: boolean;
   hasVoted: boolean;
   votedFor?: string; // inboxId of voted player
@@ -107,12 +109,14 @@ export function getPlayer(state: GameState, inboxId: string): Player | undefined
 export function addPlayer(
   state: GameState,
   inboxId: string,
-  address: string
+  address: string,
+  displayName: string
 ): void {
   if (!state.players.has(inboxId)) {
     state.players.set(inboxId, {
       inboxId,
       address,
+      displayName,
       isImposter: false,
       hasVoted: false,
     });
@@ -246,4 +250,56 @@ export function resetGameState(state: GameState): void {
   state.votes.clear();
   state.votedOutInboxId = undefined;
   state.winner = undefined;
+}
+
+/**
+ * Validation result for display names
+ */
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * Validate a display name for registration
+ */
+export function validateDisplayName(
+  name: string,
+  existingNames: string[]
+): ValidationResult {
+  // Empty check
+  if (!name || name.trim().length === 0) {
+    return { valid: false, error: 'Name cannot be empty' };
+  }
+
+  // Length check
+  const trimmedName = name.trim();
+  if (trimmedName.length > 20) {
+    return { valid: false, error: 'Name must be 20 characters or less' };
+  }
+
+  if (trimmedName.length < 2) {
+    return { valid: false, error: 'Name must be at least 2 characters' };
+  }
+
+  // Character check (alphanumeric + spaces + underscore + hyphen)
+  if (!/^[a-zA-Z0-9\s_-]+$/.test(trimmedName)) {
+    return {
+      valid: false,
+      error: 'Name can only contain letters, numbers, spaces, _, and -',
+    };
+  }
+
+  // Duplicate check (case-insensitive)
+  if (existingNames.some((n) => n.toLowerCase() === trimmedName.toLowerCase())) {
+    return { valid: false, error: 'Name already taken! Choose another.' };
+  }
+
+  // Reserved words check
+  const reserved = ['bot', 'susbot', 'imposter', 'admin', 'system'];
+  if (reserved.includes(trimmedName.toLowerCase())) {
+    return { valid: false, error: 'This name is reserved. Choose another.' };
+  }
+
+  return { valid: true };
 }

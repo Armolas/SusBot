@@ -11,32 +11,50 @@ export async function handleTextMessage(
   senderInboxId: string,
   gameManager: GameManager
 ): Promise<void> {
-  const command = messageContent.toLowerCase().trim();
+  const command = messageContent.trim();
+  const lowerCommand = command.toLowerCase();
 
+  // Check if player is registering their name (/join <name>)
+  const gameState = gameManager.getGameStatus(conversation.id);
+  if (gameState?.status === 'registering_names') {
+    if (command.startsWith('/join ')) {
+      const displayName = command.substring(6).trim();
+      if (displayName) {
+        await gameManager.registerPlayer(conversation, senderInboxId, displayName);
+      } else {
+        await conversation.send("❌ Please provide a name: `/join YourName`");
+      }
+      return;
+    }
+    // Ignore all other messages during registration phase
+    return;
+  }
+
+  // Handle game commands
   switch (true) {
-    case command === "/imposter start":
-    case command === "/start":
+    case lowerCommand === "/imposter start":
+    case lowerCommand === "/start":
       await gameManager.startGame(conversation);
       break;
 
-    case command === "/imposter cancel":
-    case command === "/cancel":
+    case lowerCommand === "/imposter cancel":
+    case lowerCommand === "/cancel":
       await gameManager.cancelGame(conversation);
       break;
 
-    case command === "/imposter help":
-    case command === "/help":
+    case lowerCommand === "/imposter help":
+    case lowerCommand === "/help":
       await handleHelpCommand(conversation);
       break;
 
-    case command === "/imposter status":
-    case command === "/status":
+    case lowerCommand === "/imposter status":
+    case lowerCommand === "/status":
       await handleStatusCommand(conversation, gameManager);
       break;
 
     // Handle number responses for polls (fallback)
-    case /^[1-3]$/.test(command):
-      await handleNumberResponse(conversation, command, senderInboxId, gameManager);
+    case /^[1-3]$/.test(lowerCommand):
+      await handleNumberResponse(conversation, lowerCommand, senderInboxId, gameManager);
       break;
 
     default:
@@ -138,14 +156,15 @@ async function handleHelpCommand(conversation: Conversation): Promise<void> {
 \`/imposter help\` - Show this help
 
 🎯 **Game Flow:**
-1️⃣ Vote for discussion time (5/7/10 min)
-2️⃣ Receive your role via DM
-3️⃣ Discuss the secret word
-4️⃣ Vote for the imposter
-5️⃣ See results!
+1️⃣ Register with \`/join YourName\`
+2️⃣ Vote for discussion time (5/7/10 min)
+3️⃣ Receive your role via DM
+4️⃣ Discuss the secret word
+5️⃣ Vote for the imposter
+6️⃣ See results!
 
 💡 **Tips:**
-• Need 3+ players to start
+• Need 3+ players to register
 • Normal players: Mention the word subtly
 • Imposter: Try to blend in!
 • Winner: Group if imposter caught, Imposter if not
@@ -175,6 +194,11 @@ async function handleStatusCommand(
   let statusMessage = `📊 **Game Status**\n\n`;
 
   switch (gameState.status) {
+    case 'registering_names':
+      statusMessage += `Phase: 📝 Registering players\n`;
+      statusMessage += `Registered: ${gameState.players.size}/3 minimum`;
+      break;
+
     case 'voting_duration':
       statusMessage += `Phase: ⏱️ Voting for duration\n`;
       statusMessage += `Votes: ${gameState.durationVotes.length} received`;

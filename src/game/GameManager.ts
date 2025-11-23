@@ -13,11 +13,11 @@ import {
   calculateVoteResults,
   determineWinner,
   resetGameState,
+  validateDisplayName,
 } from "./GameState.js";
 import { getRandomWord } from "./WordList.js";
 import { type ActionsContent, ContentTypeActions } from "../types/ActionsContent.js";
 import { type IntentContent, ContentTypeIntent } from "../types/IntentContent.js";
-import { resolveAddressToNameCached } from "../helpers/nameResolver.js";
 
 /**
  * GameManager - Core game orchestration class
@@ -45,7 +45,7 @@ export class GameManager {
   }
 
   /**
-   * Start a new game - create duration voting poll
+   * Start a new game - begin with name registration phase
    */
   async startGame(conversation: Conversation): Promise<void> {
     const groupId = conversation.id;
@@ -62,15 +62,133 @@ export class GameManager {
     // Get group members
     const members = await conversation.members();
 
-    if (members.length < 3) {
+    if (members.length < 4) {
       await conversation.send(
-        "❌ You need at least 3 players to start the game! Invite more friends to the group."
+        "❌ You need at least 4 members in the group (3 players + bot) to start the game!"
       );
       return;
     }
 
-    // Reset state
+    // Reset state and start registration phase
     resetGameState(gameState);
+    gameState.status = 'registering_names';
+
+    await conversation.send(
+      "🎮 **SUSBOT GAME STARTING!**\n\n" +
+      "📝 **Register to play!** Type:\n" +
+      "`/join YourName`\n\n" +
+      "Example: `/join Alice`\n\n" +
+      "⏱️ You have **60 seconds** to join!\n" +
+      "Minimum **3 players** needed."
+    );
+
+    // Set timeout for registration (60 seconds)
+    this.setTimer(groupId, async () => {
+      await this.finalizeRegistration(conversation);
+    }, 60000);
+  }
+
+  /**
+   * Register a player with their display name
+   */
+  async registerPlayer(
+    conversation: Conversation,
+    inboxId: string,
+    displayName: string
+  ): Promise<void> {
+    const gameState = this.getGameState(conversation.id);
+
+    if (gameState.status !== 'registering_names') {
+      return;
+    }
+
+    // Get existing names
+    const existingNames = Array.from(gameState.players.values()).map(
+      (p) => p.displayName
+    );
+
+    // Validate name
+    const validation = validateDisplayName(displayName.trim(), existingNames);
+    if (!validation.valid) {
+      await conversation.send(`❌ ${validation.error}`);
+      return;
+    }
+
+    // Get player's address
+    const inboxState = await this.client.preferences.inboxStateFromInboxIds([
+      inboxId,
+    ]);
+    const address =
+      inboxState[0]?.identifiers[0]?.identifier || inboxId;
+
+    // Check if player already registered (update name)
+    if (gameState.players.has(inboxId)) {
+      const oldName = gameState.players.get(inboxId)!.displayName;
+      gameState.players.get(inboxId)!.displayName = displayName.trim();
+      await conversation.send(
+        `✅ **${oldName}** changed name to **${displayName.trim()}**! ` +
+          `(${gameState.players.size} players)`
+      );
+      console.log(`📝 ${oldName} → ${displayName.trim()} (${inboxId})`);
+      return;
+    }
+
+    // Add new player
+    addPlayer(gameState, inboxId, address, displayName.trim());
+
+    const playerCount = gameState.players.size;
+    const emoji = playerCount >= 3 ? '🎉' : '';
+    await conversation.send(
+      `✅ **${displayName.trim()}** joined! (${playerCount}/3 minimum) ${emoji}`
+    );
+    console.log(`📝 Player registered: ${displayName.trim()} (${inboxId})`);
+  }
+
+  /**
+   * Finalize registration and proceed to duration voting
+   */
+  private async finalizeRegistration(conversation: Conversation): Promise<void> {
+    const gameState = this.getGameState(conversation.id);
+
+    if (gameState.status !== 'registering_names') {
+      return;
+    }
+
+    const playerCount = gameState.players.size;
+
+    // Check minimum players
+    if (playerCount < 3) {
+      await conversation.send(
+        `❌ Not enough players! Only ${playerCount} registered.\n\n` +
+          "Need at least 3 players. Game cancelled.\n" +
+          "Type `/imposter start` to try again."
+      );
+      resetGameState(gameState);
+      return;
+    }
+
+    // Show locked-in players
+    const playerNames = Array.from(gameState.players.values())
+      .map((p) => `• ${p.displayName}`)
+      .join('\n');
+
+    await conversation.send(
+      `🔒 **Registration closed!**\n\n` +
+        `**Players locked in:**\n${playerNames}\n\n` +
+        `⏱️ Now vote for discussion duration:`
+    );
+
+    console.log(`🔒 ${playerCount} players registered for ${conversation.id}`);
+
+    // Move to duration voting
+    await this.startDurationVoting(conversation);
+  }
+
+  /**
+   * Start duration voting phase
+   */
+  private async startDurationVoting(conversation: Conversation): Promise<void> {
+    const gameState = this.getGameState(conversation.id);
     gameState.status = 'voting_duration';
 
     // Create duration voting actions
@@ -81,18 +199,13 @@ export class GameManager {
         { id: '5', label: '5 minutes ⚡', style: 'primary' },
         { id: '7', label: '7 minutes ⏰', style: 'primary' },
         { id: '10', label: '10 minutes 🕐', style: 'primary' },
-      ]
+      ],
     };
-
-    await conversation.send(
-      "🎮 **SUSBOT GAME STARTING!**\n\n" +
-      "Tap a button to vote for discussion time:"
-    );
 
     await conversation.send(actionsContent, ContentTypeActions);
 
     // Set timeout for voting (60 seconds)
-    this.setTimer(groupId, async () => {
+    this.setTimer(conversation.id, async () => {
       await this.finalizeDurationVote(conversation);
     }, 60000);
   }
@@ -109,6 +222,11 @@ export class GameManager {
 
     if (gameState.status !== 'voting_duration') {
       return; // Not in voting phase
+    }
+
+    // Only allow registered players to vote
+    if (!gameState.players.has(voterInboxId)) {
+      return; // Ignore votes from non-registered players
     }
 
     recordDurationVote(gameState, voterInboxId, duration);
@@ -153,34 +271,18 @@ export class GameManager {
     const gameState = this.getGameState(conversation.id);
     gameState.status = 'assigning_roles';
 
-    // Get all group members
-    const members = await conversation.members();
-    const memberInboxIds = members.map(m => m.inboxId);
+    // Players are already registered with their display names
+    const playerArray = Array.from(gameState.players.values());
 
-    // Filter out the bot itself
-    const players = memberInboxIds.filter(id => id !== this.client.inboxId);
-
-    if (players.length < 3) {
+    if (playerArray.length < 3) {
       await conversation.send("❌ Not enough players! Need at least 3 players.");
       resetGameState(gameState);
       return;
     }
 
-    // Add players to game state
-    for (const member of members) {
-      if (member.inboxId !== this.client.inboxId) {
-        // Get address from inbox state
-        const inboxState = await this.client.preferences.inboxStateFromInboxIds([
-          member.inboxId,
-        ]);
-        const address = inboxState[0]?.identifiers[0]?.identifier || member.inboxId;
-        addPlayer(gameState, member.inboxId, address);
-      }
-    }
-
     // Randomly select imposter
-    const randomIndex = Math.floor(Math.random() * players.length);
-    const imposterInboxId = players[randomIndex];
+    const randomIndex = Math.floor(Math.random() * playerArray.length);
+    const imposterInboxId = playerArray[randomIndex].inboxId;
     setImposter(gameState, imposterInboxId);
 
     // Select secret word
@@ -228,7 +330,7 @@ export class GameManager {
     }
 
     await conversation.send(
-      `✅ Roles assigned! ${dmSuccessCount}/${players.length} players received their roles.\n\n` +
+      `✅ Roles assigned! ${dmSuccessCount}/${playerArray.length} players received their roles.\n\n` +
       "🎲 Randomly selecting someone to start..."
     );
 
@@ -250,11 +352,8 @@ export class GameManager {
 
     gameState.currentSpeakerInboxId = speaker.inboxId;
 
-    // Resolve speaker's name (ENS/Basename or shortened address)
-    const speakerName = await resolveAddressToNameCached(speaker.address);
-
     await conversation.send(
-      `🎤 **${speakerName}** will start the discussion!\n\n` +
+      `🎤 **${speaker.displayName}** will start the discussion!\n\n` +
       `⏱️ You have **${gameState.selectedDuration} minutes** to discuss.\n\n` +
       "💬 Talk about the word to find the imposter!\n\n" +
       "GO! 🚀"
@@ -309,15 +408,13 @@ export class GameManager {
     gameState.status = 'voting';
     gameState.votingStartedAt = new Date();
 
-    // Create voting actions with all players (resolve names)
+    // Create voting actions with all registered players
     const playerArray = Array.from(gameState.players.values());
-    const actions = await Promise.all(
-      playerArray.map(async (player) => ({
-        id: player.inboxId,
-        label: await resolveAddressToNameCached(player.address),
-        style: 'secondary' as const,
-      }))
-    );
+    const actions = playerArray.map((player) => ({
+      id: player.inboxId,
+      label: player.displayName,
+      style: 'secondary' as const,
+    }));
 
     const actionsContent: ActionsContent = {
       id: `voting-${Date.now()}`,
@@ -347,6 +444,11 @@ export class GameManager {
 
     if (gameState.status !== 'voting') {
       return;
+    }
+
+    // Only allow registered players to vote
+    if (!gameState.players.has(voterInboxId)) {
+      return; // Ignore votes from non-registered players
     }
 
     recordVote(gameState, voterInboxId, voteeInboxId);
@@ -386,20 +488,19 @@ export class GameManager {
     gameState.votedOutInboxId = votedOutInboxId;
     gameState.winner = winner;
 
-    // Resolve names for all players in vote summary
-    const votedOutName = await resolveAddressToNameCached(votedOutPlayer.address);
+    // Get display names for results
+    const votedOutName = votedOutPlayer.displayName;
     const imposterPlayer = gameState.players.get(gameState.imposterInboxId!);
-    const imposterName = imposterPlayer ? await resolveAddressToNameCached(imposterPlayer.address) : 'Unknown';
+    const imposterName = imposterPlayer ? imposterPlayer.displayName : 'Unknown';
 
-    // Build vote summary with resolved names
-    const voteSummaryPromises = Array.from(gameState.votes.entries()).map(async ([voter, votee]) => {
+    // Build vote summary with display names
+    const voteSummary = Array.from(gameState.votes.entries()).map(([voter, votee]) => {
       const voterPlayer = gameState.players.get(voter);
       const voteePlayer = gameState.players.get(votee);
-      const voterName = voterPlayer ? await resolveAddressToNameCached(voterPlayer.address) : voter;
-      const voteeName = voteePlayer ? await resolveAddressToNameCached(voteePlayer.address) : votee;
+      const voterName = voterPlayer ? voterPlayer.displayName : voter;
+      const voteeName = voteePlayer ? voteePlayer.displayName : votee;
       return `• ${voterName} → ${voteeName}`;
-    });
-    const voteSummary = (await Promise.all(voteSummaryPromises)).join('\n');
+    }).join('\n');
 
     // Send results
     await conversation.send(
