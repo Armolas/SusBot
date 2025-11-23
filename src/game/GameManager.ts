@@ -15,7 +15,8 @@ import {
   resetGameState,
 } from "./GameState.js";
 import { getRandomWord } from "./WordList.js";
-import { createPoll, type PollContent, ContentTypePoll } from "../types/PollContent.js";
+import { type ActionsContent, ContentTypeActions } from "../types/ActionsContent.js";
+import { type IntentContent, ContentTypeIntent } from "../types/IntentContent.js";
 import { resolveAddressToNameCached } from "../helpers/nameResolver.js";
 
 /**
@@ -72,23 +73,23 @@ export class GameManager {
     resetGameState(gameState);
     gameState.status = 'voting_duration';
 
-    // Create duration poll
-    const pollContent: PollContent = createPoll(
-      `duration-${Date.now()}`,
-      "⏱️ How long should the discussion phase be?",
-      [
-        { id: '5', label: '5 minutes ⚡' },
-        { id: '7', label: '7 minutes ⏰' },
-        { id: '10', label: '10 minutes 🕐' },
+    // Create duration voting actions
+    const actionsContent: ActionsContent = {
+      id: `duration-${Date.now()}`,
+      description: "⏱️ How long should the discussion phase be?",
+      actions: [
+        { id: '5', label: '5 minutes ⚡', style: 'primary' },
+        { id: '7', label: '7 minutes ⏰', style: 'primary' },
+        { id: '10', label: '10 minutes 🕐', style: 'primary' },
       ]
-    );
+    };
 
     await conversation.send(
-      "🎮 **IMPOSTER GAME STARTING!**\n\n" +
-      "Vote for the discussion time:"
+      "🎮 **SUSBOT GAME STARTING!**\n\n" +
+      "Tap a button to vote for discussion time:"
     );
 
-    await conversation.send(pollContent, ContentTypePoll);
+    await conversation.send(actionsContent, ContentTypeActions);
 
     // Set timeout for voting (60 seconds)
     this.setTimer(groupId, async () => {
@@ -308,22 +309,23 @@ export class GameManager {
     gameState.status = 'voting';
     gameState.votingStartedAt = new Date();
 
-    // Create poll with all players (resolve names)
+    // Create voting actions with all players (resolve names)
     const playerArray = Array.from(gameState.players.values());
-    const options = await Promise.all(
+    const actions = await Promise.all(
       playerArray.map(async (player) => ({
         id: player.inboxId,
         label: await resolveAddressToNameCached(player.address),
+        style: 'secondary' as const,
       }))
     );
 
-    const pollContent: PollContent = createPoll(
-      `voting-${Date.now()}`,
-      "🗳️ Who is the IMPOSTER?",
-      options
-    );
+    const actionsContent: ActionsContent = {
+      id: `voting-${Date.now()}`,
+      description: "🗳️ Who is the IMPOSTER?",
+      actions,
+    };
 
-    await conversation.send(pollContent, ContentTypePoll);
+    await conversation.send(actionsContent, ContentTypeActions);
 
     // Set timeout for voting (60 seconds)
     this.setTimer(conversation.id, async () => {
