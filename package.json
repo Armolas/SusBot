@@ -1,0 +1,42 @@
+{
+  "name": "susbot",
+  "version": "1.0.0",
+  "description": "SusBot - XMTP agent for playing social deduction games in group chats",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx --env-file .env --watch src/index.ts",
+    "start": "node dist/index.js",
+    "gen:keys": "tsx scripts/generateKeys.ts",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": [
+    "xmtp",
+    "agent",
+    "game",
+    "susbot",
+    "imposter",
+    "social-deduction",
+    "group-chat"
+  ],
+  "author": "Muritadhor Arowolo",
+  "license": "MIT",
+  "dependencies": {
+    "@xmtp/content-type-primitives": "^2.0.2",
+    "@xmtp/node-sdk": "^2.1.0",
+    "uint8arrays": "^5.1.0",
+    "viem": "^2.22.17"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "eslint": "^9.19.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
